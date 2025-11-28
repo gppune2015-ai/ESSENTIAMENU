@@ -1,0 +1,31 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Flipbook Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
+</head>
+<body>
+
+  <header class="topbar">
+    <h2>Flipbook Viewer</h2>
+    <div class="controls">
+      <button id="prevBtn">◀ Prev</button>
+      <span id="pageIndicator">Page 0 / 0</span>
+      <button id="nextBtn">Next ▶</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="flipbook" class="flipbook"></div>
+  </main>
+
+  <footer class="footer">
+    PDF Flipbook • Powered by PDF.js
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

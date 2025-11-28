@@ -1,0 +1,39 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f4f5f7;
+}
+
+.topbar {
+  padding: 15px 20px;
+  background: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.controls button {
+  padding: 8px 15px;
+  background: #0052cc;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.controls span {
+  margin: 0 10px;
+  font-weight: bold;
+}
+
+.flipbook {
+  margin: 30px auto;
+  text-align: center;
+}
+
+footer.footer {
+  text-align: center;
+  padding: 10px;
+  color: #666;
+}
