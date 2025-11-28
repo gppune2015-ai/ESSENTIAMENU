@@ -1,25 +1,59 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Flipbook Viewer</title>
-  <link rel="stylesheet" href="styles.css">
-  <script src="https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
-</head>
-<body>
-  <div class="flipbook-wrapper">
+const PDF_URL = "myfile.pdf"; // must match exact filename in repo
 
-    <button id="prevBtn" class="nav-btn">◀</button>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.worker.min.js";
 
-    <div id="flipbook" class="flipbook">
-      <div id="pageContainer" class="page-container"></div>
-    </div>
+let pdfDoc = null;
+let currentPage = 1;
 
-    <button id="nextBtn" class="nav-btn">▶</button>
+const canvas = document.getElementById("pdfCanvas");
+const ctx = canvas.getContext("2d");
 
-  </div>
+// Render a PDF page
+function renderPage(pageNum) {
+  pdfDoc.getPage(pageNum).then(page => {
+    const viewport = page.getViewport({ scale: 1.2 });
 
-  <script src="script.js"></script>
-</body>
-</html>
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+
+    const renderCtx = { canvasContext: ctx, viewport: viewport };
+    
+    // Flip animation
+    canvas.style.transform = "rotateY(180deg)";
+    setTimeout(() => page.render(renderCtx), 50);
+    setTimeout(() => {
+      canvas.style.transform = "rotateY(0deg)";
+      canvas.style.transition = "transform 0.6s ease";
+    }, 100);
+  });
+}
+
+// Next page
+function nextPage() {
+  if (currentPage >= pdfDoc.numPages) return;
+  currentPage++;
+  renderPage(currentPage);
+}
+
+// Previous page
+function prevPage() {
+  if (currentPage <= 1) return;
+  currentPage--;
+  renderPage(currentPage);
+}
+
+document.getElementById("nextBtn").onclick = nextPage;
+document.getElementById("prevBtn").onclick = prevPage;
+
+// Load PDF
+pdfjsLib.getDocument(PDF_URL).promise
+  .then(pdf => {
+    pdfDoc = pdf;
+    renderPage(currentPage);
+  })
+  .catch(err => {
+    canvas.style.display = "none";
+    alert("❌ Could not load PDF. Check filename/path.");
+    console.error(err);
+  });
