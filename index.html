@@ -8,16 +8,15 @@
   <script src="https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
 </head>
 <body>
-  <div class="flipbook-container">
+  <div class="flipbook-wrapper">
 
-    <button id="prevBtn" class="nav-btn left">◀</button>
+    <button id="prevBtn" class="nav-btn">◀</button>
 
     <div id="flipbook" class="flipbook">
-      <div class="page" id="pageFront"></div>
-      <div class="page" id="pageBack"></div>
+      <div id="pageContainer" class="page-container"></div>
     </div>
 
-    <button id="nextBtn" class="nav-btn right">▶</button>
+    <button id="nextBtn" class="nav-btn">▶</button>
 
   </div>
 
