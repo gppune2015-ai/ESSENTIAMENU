@@ -1,21 +1,56 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Flipbook Viewer</title>
-  <link rel="stylesheet" href="styles.css">
-  <script src="https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3D PDF Flipbook</title>
+
+  <!-- pdf.js CDN (adjust version if needed) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.min.js"></script>
+
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="flipbook-wrapper">
-    <button id="prevBtn" class="nav-btn">◀</button>
+  <div class="container">
+    <header class="controls" role="region" aria-label="Flipbook controls">
+      <button id="btnPrev" class="btn big" aria-label="Previous spread">⟨ Prev</button>
 
-    <div id="flipbook" class="flipbook">
-      <canvas id="pdfCanvas"></canvas>
-    </div>
+      <div class="input-group">
+        <input id="pdfUrl" type="text" placeholder="Paste PDF URL (optional)" aria-label="PDF URL"/>
+        <input id="fileInput" type="file" accept="application/pdf" aria-label="Upload PDF file"/>
+        <button id="loadBtn" class="btn">Load PDF</button>
+      </div>
 
-    <button id="nextBtn" class="nav-btn">▶</button>
+      <button id="btnNext" class="btn big" aria-label="Next spread">Next ⟩</button>
+
+      <div class="meta" aria-live="polite">
+        <div class="page-number" id="pageDisplay">—</div>
+        <div class="total" id="totalPages"></div>
+      </div>
+    </header>
+
+    <main class="stage" id="stage">
+      <div class="book" id="book">
+        <div class="spread" id="spread" role="group" aria-label="Book spread">
+          <div class="page left" id="leftPage" aria-hidden="false"><div class="placeholder">Drop PDF or Use Load</div></div>
+
+          <div class="flip-layer" id="flipLayer" aria-hidden="true">
+            <div class="face front" id="flipFront"></div>
+            <div class="face back" id="flipBack"></div>
+          </div>
+
+          <div class="page right" id="rightPage" aria-hidden="false"><div class="placeholder">Drop PDF or Use Load</div></div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="thumbs" id="thumbs" aria-hidden="false"></div>
+      <div class="notes">
+        <div id="busy"></div>
+        <div class="note">Tip: upload file or paste PDF URL and click <strong>Load PDF</strong>. Remote PDFs require CORS.</div>
+      </div>
+    </footer>
   </div>
 
   <script src="script.js"></script>
