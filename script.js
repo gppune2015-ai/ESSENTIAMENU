@@ -1,6 +1,6 @@
-// Single-page 3D flipbook with: auto-load myfile.pdf, skip PDF page #2, single-page view, wheel & swipe navigation
+// Fixed single-page flipbook script — robust loader and mobile overlay nav
 (function(){
-  // pdf.js worker
+  // Ensure pdfjs is defined
   if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.worker.min.js';
   } else {
@@ -15,35 +15,47 @@
   const flipFront = document.getElementById('flipFront');
   const flipBack = document.getElementById('flipBack');
   const stage = document.getElementById('stage');
+  const mobileNav = document.getElementById('mobileNav');
+  const mPrev = document.getElementById('mPrev');
+  const mNext = document.getElementById('mNext');
 
   let pdfDoc = null;
-  let actualTotal = 0;       // actual PDF page count
-  let pageMap = [];         // maps logical index -> actual PDF page number (skips page 2)
-  let currentIndex = 0;     // index into pageMap (0-based)
-  let cache = {};           // cache images by actual PDF page number
+  let actualTotal = 0;
+  let pageMap = [];
+  let currentIndex = 0;
+  let cache = {};
   let animating = false;
 
-  // --- render one PDF page to a data URL (cache)
-  async function renderPageToDataURL(pageNum, scale = 1.5){
-    if (cache[pageNum]) return cache[pageNum];
-    const page = await pdfDoc.getPage(pageNum);
-    // scale depends on page container; choose dynamic scale for sharpness
-    // approximate width in px:
-    const containerWidth = Math.min(document.querySelector('.page').clientWidth, 1000);
-    const viewport = page.getViewport({ scale: scale * (containerWidth / 800) });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const data = canvas.toDataURL('image/jpeg', 0.92);
-    cache[pageNum] = data;
-    return data;
+  // helper: set placeholder text (also logs)
+  function setPlaceholder(msg){
+    pageEl.innerHTML = `<div class="placeholder">${msg}</div>`;
+    console.info('Flipbook:', msg);
   }
 
-  // set main page image
+  // render page to dataURL (cached)
+  async function renderPageToDataURL(pageNum, scale = 1.5){
+    if (cache[pageNum]) return cache[pageNum];
+    try {
+      const page = await pdfDoc.getPage(pageNum);
+      // dynamic scale based on container
+      const containerWidth = Math.min(document.querySelector('.page').clientWidth, 1000);
+      const viewport = page.getViewport({ scale: scale * (containerWidth / 800) });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const data = canvas.toDataURL('image/jpeg', 0.92);
+      cache[pageNum] = data;
+      return data;
+    } catch (err) {
+      console.error('Render error for page', pageNum, err);
+      return null;
+    }
+  }
+
   function setMainPageImage(dataUrl){
     pageEl.innerHTML = '';
     if (!dataUrl) {
@@ -55,17 +67,20 @@
     pageEl.appendChild(img);
   }
 
-  // update current displayed page instantly (no animation)
   async function showIndexInstant(idx){
     if (!pdfDoc) return;
     idx = Math.max(0, Math.min(idx, pageMap.length - 1));
     currentIndex = idx;
     const actual = pageMap[idx];
+    setPlaceholder('Rendering page…');
     const data = (actual <= actualTotal) ? await renderPageToDataURL(actual) : null;
-    setMainPageImage(data);
+    if (!data) {
+      setPlaceholder('Could not render page.');
+    } else {
+      setMainPageImage(data);
+    }
   }
 
-  // flip animation: show current -> target index
   async function flipToIndex(targetIdx){
     if (!pdfDoc || animating) return;
     targetIdx = Math.max(0, Math.min(targetIdx, pageMap.length - 1));
@@ -76,28 +91,23 @@
     const curActual = pageMap[currentIndex];
     const nextActual = pageMap[targetIdx];
 
-    // prepare front/back images: front = current page, back = next page
     const frontUrl = (curActual <= actualTotal) ? await renderPageToDataURL(curActual) : null;
     const backUrl  = (nextActual <= actualTotal) ? await renderPageToDataURL(nextActual) : null;
 
     flipFront.style.background = frontUrl ? `url('${frontUrl}') center/cover no-repeat` : '#fff';
     flipBack.style.background  = backUrl  ? `url('${backUrl}') center/cover no-repeat` : '#fff';
 
-    // show flip-layer and choose transform origin
     flipLayer.classList.add('show','flip-animate');
     flipLayer.style.transformOrigin = forward ? 'left center' : 'right center';
     flipLayer.style.transform = forward ? 'rotateY(0deg)' : 'rotateY(180deg)';
 
-    // adjust duration for smaller screens
     const duration = (window.innerWidth < 900) ? 420 : 700;
     flipLayer.style.transitionDuration = duration + 'ms';
 
-    // trigger
     requestAnimationFrame(()=> {
       flipLayer.style.transform = forward ? 'rotateY(-180deg)' : 'rotateY(0deg)';
     });
 
-    // wait for end
     await new Promise(res => {
       const onEnd = (e) => {
         flipLayer.removeEventListener('transitionend', onEnd);
@@ -106,7 +116,6 @@
       flipLayer.addEventListener('transitionend', onEnd);
     });
 
-    // hide flip layer, update main page
     flipLayer.classList.remove('show','flip-animate');
     flipLayer.style.transform = '';
     currentIndex = targetIdx;
@@ -114,15 +123,21 @@
     animating = false;
   }
 
-  // next / prev actions (skip page #2 already enforced via pageMap)
   function nextPage(){ flipToIndex(currentIndex + 1); }
   function prevPage(){ flipToIndex(currentIndex - 1); }
 
-  // attach buttons
+  // attach UI
   btnNext.addEventListener('click', nextPage);
   btnPrev.addEventListener('click', prevPage);
+  if (mPrev && mNext) {
+    mPrev.addEventListener('click', prevPage);
+    mNext.addEventListener('click', nextPage);
+    // ensure mobile overlay visible attribute toggled
+    const small = window.matchMedia('(max-width:520px)').matches;
+    mobileNav.setAttribute('aria-hidden', small ? 'false' : 'true');
+  }
 
-  // wheel to change one page per scroll (with small debounce)
+  // wheel debounce
   (function addWheel(){
     let last = 0;
     window.addEventListener('wheel', (e) => {
@@ -135,7 +150,7 @@
     }, {passive:true});
   })();
 
-  // touch swipe (mobile)
+  // touch swipe
   (function addTouch(){
     let startX=0,startY=0,moved=false;
     stage.addEventListener('touchstart', (ev)=> {
@@ -159,83 +174,77 @@
     }, {passive:true});
   })();
 
-  // keyboard nav
-  window.addEventListener('keydown', (e)=>{
+  window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') nextPage();
     if (e.key === 'ArrowLeft') prevPage();
   });
 
-  // load PDF by URL or ArrayBuffer
+  // Loaders (GET approach) — more reliable than HEAD on some hosts
   async function loadPdfUrl(url){
     try {
-      pdfDoc = await pdfjsLib.getDocument({ url }).promise;
-      await setupPageMap();
-    } catch(err){
-      console.error('Load failed', err);
-      // try nothing more; show message
-      pageEl.innerHTML = '<div class="placeholder">Could not load PDF.</div>';
+      // try fetching the file first to detect 404/CORS and give better message
+      const resp = await fetch(url, { method: 'GET' });
+      if (!resp.ok) {
+        setPlaceholder(`PDF not found (HTTP ${resp.status}). Put myfile.pdf next to files.`);
+        console.error('Fetch status', resp.status);
+        return;
+      }
+      const buf = await resp.arrayBuffer();
+      await loadPdfData(buf);
+    } catch (err) {
+      console.error('Fetch/load error', err);
+      setPlaceholder('Could not fetch myfile.pdf — see console for details.');
     }
   }
+
   async function loadPdfData(buf){
     try {
       pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
       await setupPageMap();
-    } catch(err){
-      console.error('Load failed', err);
-      pageEl.innerHTML = '<div class="placeholder">Could not load PDF.</div>';
+    } catch (err) {
+      console.error('PDF load error', err);
+      setPlaceholder('Could not load PDF — it may be corrupt or unsupported.');
     }
   }
 
-  // Build pageMap skipping actual page #2
+  // Build pageMap skipping page 2
   async function setupPageMap(){
-    if (!pdfDoc) return;
+    if (!pdfDoc) { setPlaceholder('PDF not available'); return; }
     actualTotal = pdfDoc.numPages;
     pageMap = [];
-    for (let p=1;p<=actualTotal;p++){
-      if (p === 2) continue; // skip only page 2
+    for (let p=1; p<=actualTotal; p++){
+      if (p === 2) continue; // skip page 2
       pageMap.push(p);
     }
-    // if the PDF has only page 2 or becomes empty after skipping, fallback to include page 2
-    if (pageMap.length === 0 && actualTotal >= 1){
-      // if total was 1 or only page 2 existed, don't skip
+    if (pageMap.length === 0 && actualTotal >= 1) {
+      // fallback: don't skip if skipping removed all pages
       pageMap = [];
-      for (let p=1;p<=actualTotal;p++) pageMap.push(p);
+      for (let p=1; p<=actualTotal; p++) pageMap.push(p);
     }
     currentIndex = 0;
     cache = {};
     await showIndexInstant(0);
   }
 
-  // Auto-load myfile.pdf (in same folder) — use HEAD check to avoid console noise
+  // Auto-load myfile.pdf when DOM ready (no HEAD check)
   document.addEventListener('DOMContentLoaded', function () {
     const defaultPdfPath = 'myfile.pdf';
-    fetch(defaultPdfPath, { method: 'HEAD' })
-      .then(resp => {
-        if (resp.ok) {
-          loadPdfUrl(defaultPdfPath);
-        } else {
-          pageEl.innerHTML = '<div class="placeholder">Place <strong>myfile.pdf</strong> in the same folder. Viewer will auto-load it.</div>';
-        }
-      })
-      .catch(err => {
-        console.info('Could not check myfile.pdf:', err);
-        pageEl.innerHTML = '<div class="placeholder">Place <strong>myfile.pdf</strong> in the same folder. Viewer will auto-load it.</div>';
-      });
+    // Try fetch GET — will show clearer error if missing/CORS
+    loadPdfUrl(defaultPdfPath);
   });
 
-  // optional: re-render current page on resize for sharpness (debounced)
+  // Re-render on resize for crispness (debounced)
   let rto = null;
   window.addEventListener('resize', ()=>{
     clearTimeout(rto);
     rto = setTimeout(async ()=>{
       if (!pdfDoc) return;
-      // clear cache to re-render at new sizes for crispness (comment out to save CPU)
       cache = {};
       await showIndexInstant(currentIndex);
     }, 300);
   });
 
-  // expose next/prev (debug)
+  // expose helpers
   window.flipbook = { nextPage, prevPage, showIndexInstant };
 
 })();
