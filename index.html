@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>3D Single-Page Flipbook</title>
+  <title>3D Single-Page Flipbook — Fixed</title>
 
   <!-- pdf.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.min.js"></script>
@@ -12,19 +12,17 @@
 </head>
 <body>
   <div class="viewer">
-    <!-- Prev Button (left) -->
+    <!-- Desktop left/right nav (hidden on very small screens) -->
     <button id="btnPrev" class="nav big left" aria-label="Previous page">‹</button>
 
-    <!-- Book Area -->
     <main class="stage" id="stage">
       <div class="book" id="book" aria-live="polite">
-        <!-- Single page container -->
         <div class="page-wrap">
           <div class="page" id="page">
             <div class="placeholder">Loading…</div>
           </div>
 
-          <!-- flip-layer for 3D animation -->
+          <!-- flip-layer -->
           <div class="flip-layer" id="flipLayer" aria-hidden="true">
             <div class="face front" id="flipFront"></div>
             <div class="face back" id="flipBack"></div>
@@ -33,8 +31,13 @@
       </div>
     </main>
 
-    <!-- Next Button (right) -->
     <button id="btnNext" class="nav big right" aria-label="Next page">›</button>
+
+    <!-- Mobile overlay nav (always present on small screens) -->
+    <div class="mobile-nav" id="mobileNav" aria-hidden="true">
+      <button id="mPrev" class="prev" aria-label="Previous"></button>
+      <button id="mNext" class="next" aria-label="Next"></button>
+    </div>
   </div>
 
   <script src="script.js"></script>
