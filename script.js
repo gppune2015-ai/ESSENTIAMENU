@@ -1,6 +1,6 @@
-// Fixed single-page flipbook script — robust loader and mobile overlay nav
+// script.js — improved progressive rendering for crisp pages on mobile & desktop
+// Replaces previous renderPageToDataURL with a progressive low->high render that uses devicePixelRatio.
 (function(){
-  // Ensure pdfjs is defined
   if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.worker.min.js';
   } else {
@@ -23,23 +23,160 @@
   let actualTotal = 0;
   let pageMap = [];
   let currentIndex = 0;
-  let cache = {};
   let animating = false;
 
-  // helper: set placeholder text (also logs)
+  // Cache structure:
+  // cache[pageNum] = { low: dataURL, high: dataURL, highRendering: Promise|null, renderedAtWidth: width }
+  const cache = {};
+
+  // Configuration — tune as needed
+  const BASE_SCALE = 1.2;           // baseline render scale factor (multiplies with container width ratio)
+  const THUMB_SCALE = 0.7;          // thumbnail scale
+  const LOW_PREVIEW_SCALE = 0.6;    // quick low-res preview scale multiplier
+  const MAX_CANVAS_PIXELS = 2_000_000; // cap: max canvas pixels (width*height) to avoid memory blowup
+
+  // ---- Utilities ----
   function setPlaceholder(msg){
     pageEl.innerHTML = `<div class="placeholder">${msg}</div>`;
     console.info('Flipbook:', msg);
   }
 
-  // render page to dataURL (cached)
-  async function renderPageToDataURL(pageNum, scale = 1.5){
-    if (cache[pageNum]) return cache[pageNum];
+  // Compute rendering scale dynamically:
+  function computeScalesForPage(page, desiredScaleMultiplier = BASE_SCALE) {
+    // container physical width
+    const containerWidth = Math.min(document.querySelector('.page').clientWidth || 800, 1200);
+    // device pixel ratio to produce crisp images on high-DPI displays
+    const DPR = Math.max(1, window.devicePixelRatio || 1);
+
+    // width-based scale roughly: baseScale * (containerWidth / 800)
+    const baseScale = desiredScaleMultiplier * (containerWidth / 800);
+
+    // low preview scale is smaller and without DPR
+    const lowScale = Math.max(0.4, LOW_PREVIEW_SCALE * (containerWidth / 800));
+
+    // high scale includes DPR for crispness
+    let highScale = baseScale * DPR;
+
+    // ensure we do not blow up the canvas: compute estimated viewport pixels for a typical PDF page ratio
+    // We'll request page.getViewport with scale to get exact numbers later, but we can cap roughly:
+    // Approx width in px = pageWidthAtScale. We'll cap by computing viewport width * height later per page.
+
+    return { lowScale, highScale, DPR, containerWidth };
+  }
+
+  // Progressive render: first low-res then high-res replacement.
+  // Returns a promise that resolves with the low-res dataURL (immediate) and schedules high-res rendering which updates cache.
+  async function progressiveRenderPage(pageNum) {
+    // If already have high-res cached, return it immediately
+    if (cache[pageNum] && cache[pageNum].high) {
+      return { low: cache[pageNum].low || cache[pageNum].high, highImmediate: true };
+    }
+
+    // If a high rendering is already in progress, return low if available and let the high promise continue
+    if (cache[pageNum] && cache[pageNum].highRendering) {
+      return { low: cache[pageNum].low || null, highImmediate: false };
+    }
+
+    // Otherwise start rendering low + high
+    cache[pageNum] = cache[pageNum] || { low: null, high: null, highRendering: null, renderedAtWidth: 0 };
+
+    // Render low preview quickly (smaller scale)
+    const lowPromise = (async () => {
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        const { lowScale } = computeScalesForPage(page, BASE_SCALE);
+        const viewportLow = page.getViewport({ scale: lowScale });
+        // cap canvas size for low preview
+        const canvasLow = document.createElement('canvas');
+        canvasLow.width = Math.floor(viewportLow.width);
+        canvasLow.height = Math.floor(viewportLow.height);
+        const ctxLow = canvasLow.getContext('2d');
+        ctxLow.fillStyle = '#ffffff';
+        ctxLow.fillRect(0,0,canvasLow.width,canvasLow.height);
+        await page.render({ canvasContext: ctxLow, viewport: viewportLow }).promise;
+        const dataLow = canvasLow.toDataURL('image/jpeg', 0.75);
+        cache[pageNum].low = dataLow;
+        return dataLow;
+      } catch (err) {
+        console.error('Low-res render failed for', pageNum, err);
+        return null;
+      }
+    })();
+
+    // Start high-res render in background and store the promise
+    const highPromise = (async () => {
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        const { highScale, containerWidth } = computeScalesForPage(page, BASE_SCALE);
+
+        const viewportHigh = page.getViewport({ scale: highScale });
+
+        // Cap based on MAX_CANVAS_PIXELS to avoid memory blowups
+        // If width*height exceeds cap, reduce scale proportionally
+        const estimatedPixels = viewportHigh.width * viewportHigh.height;
+        let finalViewport = viewportHigh;
+        if (estimatedPixels > MAX_CANVAS_PIXELS) {
+          const reductionFactor = Math.sqrt(MAX_CANVAS_PIXELS / estimatedPixels);
+          finalViewport = page.getViewport({ scale: highScale * reductionFactor });
+          console.info(`High render for page ${pageNum} capped to avoid large canvas (factor ${reductionFactor.toFixed(2)})`);
+        }
+
+        const canvasHigh = document.createElement('canvas');
+        canvasHigh.width = Math.floor(finalViewport.width);
+        canvasHigh.height = Math.floor(finalViewport.height);
+        const ctxHigh = canvasHigh.getContext('2d');
+        ctxHigh.fillStyle = '#ffffff';
+        ctxHigh.fillRect(0,0,canvasHigh.width,canvasHigh.height);
+        await page.render({ canvasContext: ctxHigh, viewport: finalViewport }).promise;
+        const dataHigh = canvasHigh.toDataURL('image/jpeg', 0.92);
+        cache[pageNum].high = dataHigh;
+        cache[pageNum].highRendering = null;
+        cache[pageNum].renderedAtWidth = containerWidth;
+        return dataHigh;
+      } catch (err) {
+        console.error('High-res render failed for', pageNum, err);
+        cache[pageNum].highRendering = null;
+        return null;
+      }
+    })();
+
+    cache[pageNum].highRendering = highPromise;
+
+    // return the low preview immediately (when resolved)
+    const lowData = await lowPromise;
+    return { low: lowData, highImmediate: false };
+  }
+
+  // Helper to ensure high-res replacement is applied when ready for the currently visible page
+  async function ensureHighResReplacementIfNeeded(pageNum, currentDisplayedPageNum) {
+    // If high already available and different from low, apply it
+    if (!cache[pageNum]) return;
+    if (cache[pageNum].high && cache[pageNum].high !== cache[pageNum].low) {
+      // If the page on screen is still the same pageNum, update DOM
+      if (currentDisplayedPageNum === pageNum) {
+        setMainPageImage(cache[pageNum].high);
+      }
+      return;
+    }
+    // else wait for high rendering if it's in progress, then apply (only if still showing)
+    if (cache[pageNum].highRendering) {
+      try {
+        const dataHigh = await cache[pageNum].highRendering;
+        if (dataHigh && currentDisplayedPageNum === pageNum) {
+          setMainPageImage(dataHigh);
+        }
+      } catch (err) {
+        // ignore
+      }
+    }
+  }
+
+  // Create thumbnail (low-res)
+  async function renderThumbnail(pageNum) {
     try {
+      if (cache[pageNum] && cache[pageNum].thumb) return cache[pageNum].thumb;
       const page = await pdfDoc.getPage(pageNum);
-      // dynamic scale based on container
-      const containerWidth = Math.min(document.querySelector('.page').clientWidth, 1000);
-      const viewport = page.getViewport({ scale: scale * (containerWidth / 800) });
+      const viewport = page.getViewport({ scale: THUMB_SCALE });
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
@@ -47,15 +184,17 @@
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0,0,canvas.width,canvas.height);
       await page.render({ canvasContext: ctx, viewport }).promise;
-      const data = canvas.toDataURL('image/jpeg', 0.92);
-      cache[pageNum] = data;
+      const data = canvas.toDataURL('image/jpeg', 0.7);
+      cache[pageNum] = cache[pageNum] || {};
+      cache[pageNum].thumb = data;
       return data;
     } catch (err) {
-      console.error('Render error for page', pageNum, err);
+      console.error('Thumbnail render failed', pageNum, err);
       return null;
     }
   }
 
+  // DOM helpers
   function setMainPageImage(dataUrl){
     pageEl.innerHTML = '';
     if (!dataUrl) {
@@ -64,23 +203,32 @@
     }
     const img = document.createElement('img');
     img.src = dataUrl;
+    img.style.imageRendering = 'auto';
     pageEl.appendChild(img);
   }
 
+  // Show an index instantly (progressive rendering)
   async function showIndexInstant(idx){
     if (!pdfDoc) return;
     idx = Math.max(0, Math.min(idx, pageMap.length - 1));
     currentIndex = idx;
     const actual = pageMap[idx];
-    setPlaceholder('Rendering page…');
-    const data = (actual <= actualTotal) ? await renderPageToDataURL(actual) : null;
-    if (!data) {
-      setPlaceholder('Could not render page.');
-    } else {
-      setMainPageImage(data);
+    setPlaceholder('Rendering preview…');
+
+    // Start progressive render (low immediate, high in background)
+    const { low } = await progressiveRenderPage(actual);
+    if (!low) {
+      setPlaceholder('Could not render preview.');
+      return;
     }
+    // show low immediately
+    setMainPageImage(low);
+
+    // Now ensure high replacement when ready
+    ensureHighResReplacementIfNeeded(actual, actual).catch(()=>{ /* ignore */ });
   }
 
+  // Flip animation functions remain same but call progressive rendering for the back pages too
   async function flipToIndex(targetIdx){
     if (!pdfDoc || animating) return;
     targetIdx = Math.max(0, Math.min(targetIdx, pageMap.length - 1));
@@ -91,8 +239,12 @@
     const curActual = pageMap[currentIndex];
     const nextActual = pageMap[targetIdx];
 
-    const frontUrl = (curActual <= actualTotal) ? await renderPageToDataURL(curActual) : null;
-    const backUrl  = (nextActual <= actualTotal) ? await renderPageToDataURL(nextActual) : null;
+    // Ensure we have low previews for both faces (start both renders)
+    const curLowPromise = progressiveRenderPage(curActual).then(res => res.low).catch(()=>null);
+    const nextLowPromise = progressiveRenderPage(nextActual).then(res => res.low).catch(()=>null);
+
+    const frontUrl = await curLowPromise;
+    const backUrl  = await nextLowPromise;
 
     flipFront.style.background = frontUrl ? `url('${frontUrl}') center/cover no-repeat` : '#fff';
     flipBack.style.background  = backUrl  ? `url('${backUrl}') center/cover no-repeat` : '#fff';
@@ -118,26 +270,39 @@
 
     flipLayer.classList.remove('show','flip-animate');
     flipLayer.style.transform = '';
+
     currentIndex = targetIdx;
+    // Show the low preview for the new page immediately and then replace with high res when ready
     await showIndexInstant(currentIndex);
+
+    // trigger high-res replacement when it's done
+    const actualNow = pageMap[currentIndex];
+    if (cache[actualNow] && cache[actualNow].highRendering) {
+      cache[actualNow].highRendering.then((highData) => {
+        if (highData && pageMap[currentIndex] === actualNow) {
+          setMainPageImage(highData);
+        }
+      }).catch(()=>{/*ignore*/});
+    }
+
     animating = false;
   }
 
+  // Navigation helpers
   function nextPage(){ flipToIndex(currentIndex + 1); }
   function prevPage(){ flipToIndex(currentIndex - 1); }
 
-  // attach UI
+  // UI attach
   btnNext.addEventListener('click', nextPage);
   btnPrev.addEventListener('click', prevPage);
   if (mPrev && mNext) {
     mPrev.addEventListener('click', prevPage);
     mNext.addEventListener('click', nextPage);
-    // ensure mobile overlay visible attribute toggled
     const small = window.matchMedia('(max-width:520px)').matches;
     mobileNav.setAttribute('aria-hidden', small ? 'false' : 'true');
   }
 
-  // wheel debounce
+  // Wheel navigation (debounced)
   (function addWheel(){
     let last = 0;
     window.addEventListener('wheel', (e) => {
@@ -150,7 +315,7 @@
     }, {passive:true});
   })();
 
-  // touch swipe
+  // Touch swipe
   (function addTouch(){
     let startX=0,startY=0,moved=false;
     stage.addEventListener('touchstart', (ev)=> {
@@ -174,15 +339,15 @@
     }, {passive:true});
   })();
 
+  // Keyboard nav
   window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') nextPage();
     if (e.key === 'ArrowLeft') prevPage();
   });
 
-  // Loaders (GET approach) — more reliable than HEAD on some hosts
+  // Load PDF and setup pageMap (skip page 2 rule kept)
   async function loadPdfUrl(url){
     try {
-      // try fetching the file first to detect 404/CORS and give better message
       const resp = await fetch(url, { method: 'GET' });
       if (!resp.ok) {
         setPlaceholder(`PDF not found (HTTP ${resp.status}). Put myfile.pdf next to files.`);
@@ -193,7 +358,7 @@
       await loadPdfData(buf);
     } catch (err) {
       console.error('Fetch/load error', err);
-      setPlaceholder('Could not fetch myfile.pdf — see console for details.');
+      setPlaceholder('Could not fetch myfile.pdf — see console.');
     }
   }
 
@@ -207,44 +372,51 @@
     }
   }
 
-  // Build pageMap skipping page 2
   async function setupPageMap(){
     if (!pdfDoc) { setPlaceholder('PDF not available'); return; }
     actualTotal = pdfDoc.numPages;
     pageMap = [];
     for (let p=1; p<=actualTotal; p++){
-      if (p === 2) continue; // skip page 2
+      if (p === 2) continue;
       pageMap.push(p);
     }
     if (pageMap.length === 0 && actualTotal >= 1) {
-      // fallback: don't skip if skipping removed all pages
       pageMap = [];
       for (let p=1; p<=actualTotal; p++) pageMap.push(p);
     }
     currentIndex = 0;
-    cache = {};
+    // clear cache because page sizes may differ
+    for (const k in cache) delete cache[k];
     await showIndexInstant(0);
   }
 
-  // Auto-load myfile.pdf when DOM ready (no HEAD check)
+  // Auto-load myfile.pdf
   document.addEventListener('DOMContentLoaded', function () {
     const defaultPdfPath = 'myfile.pdf';
-    // Try fetch GET — will show clearer error if missing/CORS
     loadPdfUrl(defaultPdfPath);
   });
 
-  // Re-render on resize for crispness (debounced)
-  let rto = null;
-  window.addEventListener('resize', ()=>{
-    clearTimeout(rto);
-    rto = setTimeout(async ()=>{
+  // On resize, clear high-res cache if container grew/shrank significantly to force re-render at new resolution
+  let resizeTO = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTO);
+    resizeTO = setTimeout(() => {
       if (!pdfDoc) return;
-      cache = {};
-      await showIndexInstant(currentIndex);
+      // Clear high-res caches so we re-render crisp images at new sizes
+      for (const p in cache) {
+        if (cache[p]) {
+          cache[p].high = null;
+          cache[p].highRendering = null;
+        }
+      }
+      // re-show current index (will trigger progressive render again)
+      showIndexInstant(currentIndex).catch(()=>{});
     }, 300);
   });
 
-  // expose helpers
-  window.flipbook = { nextPage, prevPage, showIndexInstant };
+  // Expose for debug
+  window.flipbook = {
+    nextPage, prevPage, showIndexInstant
+  };
 
 })();
