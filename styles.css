@@ -1,6 +1,5 @@
 :root{
   --bg:#07101a;
-  --card:#0f1720;
   --muted:#9aa4b2;
   --accent:#ff6b6b;
   --paper:#ffffff;
@@ -11,85 +10,106 @@
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:linear-gradient(180deg,#04111a 0%,#07101a 100%);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#e6eef6;-webkit-font-smoothing:antialiased}
 
-/* Viewer layout */
+/* Viewer */
 .viewer{display:flex;align-items:center;justify-content:center;gap:20px;height:100vh;padding:20px}
 
-/* Nav buttons (attractive large arrows next to page) */
+/* Nav */
 .nav{
   border:0;padding:18px;border-radius:14px;background:var(--btn-bg);color:#fff;font-size:34px;line-height:1;cursor:pointer;
-  box-shadow:0 10px 30px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.4);
-  display:flex;align-items:center;justify-content:center;backdrop-filter: blur(4px);
+  box-shadow:0 10px 30px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;backdrop-filter: blur(4px);
   transition: transform .14s ease, box-shadow .14s ease;
   user-select:none;
 }
 .nav:active{transform:translateY(2px)}
-.nav.left{margin-right:6px}
-.nav.right{margin-left:6px}
+@media (max-width:520px){ .nav{display:none} }
 
-/* Hide nav on very small screens (we'll still show mobile overlay) */
-@media (max-width:520px){
-  .nav{display:none}
-}
-
-/* Stage and single page */
+/* Stage & page */
 .stage{flex:1;display:flex;align-items:center;justify-content:center;min-width:260px;max-width:980px}
 .book{width:100%;display:flex;align-items:center;justify-content:center}
-
-/* page-wrap holds the page and the flip layer */
-.page-wrap{position:relative;width:min(820px,94vw);max-height:92vh;display:flex;align-items:center;justify-content:center;perspective:2200px}
-
-/* page (single) */
+.page-wrap{position:relative;width:min(820px,94vw);max-height:92vh;display:flex;align-items:center;justify-content:center;perspective:2200px;transition:filter .25s ease}
 .page{
   width:100%;
-  height:min(92vh, 1160px);
+  height:min(92vh,1160px);
   background:var(--paper);
   border-radius:10px;
   overflow:hidden;
-  box-shadow:0 20px 60px rgba(0,0,0,0.7);
   display:flex;align-items:center;justify-content:center;
   transform-origin:50% 50%;
+  /* subtle base shadow */
+  box-shadow:0 18px 40px rgba(2,6,23,0.55), 0 6px 18px rgba(2,6,23,0.45);
+  transition:box-shadow .25s ease, transform .2s ease;
 }
 .page img{width:100%;height:100%;object-fit:contain;display:block}
 .placeholder{padding:20px;color:#666;text-align:center}
 
-/* flip-layer sits on top for 3D rotation */
-.flip-layer{
-  position:absolute;inset:0;width:100%;height:100%;transform-style:preserve-3d;pointer-events:none;display:none;z-index:40;
+/* Depth classes — toggled by JS for stronger effect during hover/flip */
+.page-wrap.depth .page {
+  box-shadow: 0 40px 120px rgba(2,6,23,0.72), 0 18px 40px rgba(2,6,23,0.55);
+  transform: translateY(-6px) scale(1.005);
 }
-.flip-layer.show{display:block;pointer-events:none}
-.flip-layer .face{
-  position:absolute;inset:0;border-radius:10px;background:var(--paper);backface-visibility:hidden;-webkit-backface-visibility:hidden;background-size:cover;background-position:center center;box-shadow:0 30px 80px rgba(0,0,0,0.7)
-}
-.flip-layer .back{transform:rotateY(180deg)}
 
-/* animation helper toggled via JS */
+/* flip-layer */
+.flip-layer{position:absolute;inset:0;width:100%;height:100%;transform-style:preserve-3d;pointer-events:none;display:none;z-index:40}
+.flip-layer.show{display:block}
+.flip-layer .face{position:absolute;inset:0;border-radius:10px;background:var(--paper);backface-visibility:hidden;-webkit-backface-visibility:hidden;background-size:cover;background-position:center center;box-shadow:0 30px 80px rgba(0,0,0,0.7)}
+.flip-layer .back{transform:rotateY(180deg)}
 .flip-animate{transition: transform 700ms cubic-bezier(.2,.9,.3,1);will-change: transform}
 
-/* Mobile overlay nav for small screens */
-.mobile-nav{
-  display:none;
-  position:absolute;z-index:60;left:0;right:0;top:50%;transform:translateY(-50%);
-  pointer-events:none;
+/* Page curl — top-right */
+.curl{
+  position:absolute;
+  top:10px;
+  right:10px;
+  width:74px;
+  height:74px;
+  border-radius:10px;
+  transform-origin:100% 0%;
+  overflow:hidden;
+  pointer-events:auto;
+  opacity:0;
+  transition: transform .35s cubic-bezier(.2,.9,.3,1), opacity .25s ease, box-shadow .2s ease;
+  z-index:50;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.45);
+  background-color:#fff;
+  background-size:cover;
+  background-position:center center;
+  border:1px solid rgba(0,0,0,0.06);
 }
+
+/* curl decorative triangular fold (simulated using ::after) */
+.curl::after{
+  content:'';
+  position:absolute;
+  inset:auto 6px 6px auto;
+  width:28px;height:28px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,255,255,0.6));
+  transform: rotate(18deg) translate(6px, -2px);
+  border-radius:2px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+
+/* show curl on hover of page-wrap (desktop only) */
+.page-wrap:hover .curl{
+  opacity:1;
+  transform: translateY(-6px) rotateZ(-6deg) rotateX(6deg) scale(1.06);
+}
+
+/* on very small screens hide curl */
+@media (max-width:520px){
+  .curl{display:none}
+  .page-wrap{width:95vw}
+  .page{height:78vh}
+}
+
+/* mobile overlay nav */
+.mobile-nav{display:none;position:absolute;z-index:60;left:0;right:0;top:50%;transform:translateY(-50%);pointer-events:none}
 .mobile-nav button{pointer-events:auto;position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.35);color:#fff;border-radius:50%;width:56px;height:56px;border:0;font-size:28px}
 .mobile-nav .prev{left:12px}
 .mobile-nav .next{right:12px}
+@media (max-width:520px){ .mobile-nav{display:block} }
 
-@media (max-width:520px){
-  .page-wrap{width:95vw}
-  .page{height:78vh}
-  .mobile-nav{display:block}
-}
+/* make curl clickable cursor on hover */
+.curl:hover{cursor:pointer}
 
-/* ensure mobile overlay icons are visible (simple arrows) */
-#mobileNav .prev::after, #mobileNav .next::after {
-  content: '';
-  display:inline-block;
-  width:18px;height:18px;
-  border-top:3px solid #fff;border-right:3px solid #fff;
-}
-#mobileNav .prev::after { transform: rotate(-135deg); margin-left:5px; }
-#mobileNav .next::after { transform: rotate(45deg); margin-right:5px; }
-
-/* Small refinements */
+/* minor improvements */
 body,button,input{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
